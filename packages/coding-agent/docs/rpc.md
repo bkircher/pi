@@ -88,7 +88,7 @@ Clients must also handle child-process startup failures, unexpected exits, stder
 
 ## Shutdown
 
-Close the child's stdin to request an orderly shutdown. Pi disposes the active runtime before exiting. Clients should still handle process signals and unexpected exits.
+Send the [`shutdown`](rpc-commands.md#shutdown) command to request an orderly shutdown and receive a correlated acceptance response. Closing the child's stdin also requests an orderly shutdown. Pi disposes the active runtime before exiting. Clients should still handle process signals and unexpected exits.
 
 An extension can also request shutdown through its extension context. Pi completes shutdown after the current command or after the active run emits `agent_settled`.
 
