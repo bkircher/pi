@@ -134,6 +134,21 @@ Response:
 {"type": "response", "command": "abort", "success": true}
 ```
 
+#### shutdown
+
+Gracefully shut down the RPC process. The command is accepted while the agent is idle or streaming; active work is aborted during runtime disposal.
+
+```json
+{"id": "req-1", "type": "shutdown"}
+```
+
+Response:
+```json
+{"id": "req-1", "type": "response", "command": "shutdown", "success": true}
+```
+
+`success: true` means shutdown was accepted, not that it has completed. After emitting the response and waiting for stdout backpressure, Pi disposes the runtime, flushes remaining stdout, and exits with code 0.
+
 #### new_session
 
 Start a fresh session. Can be cancelled by a `session_before_switch` extension event handler.

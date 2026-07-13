@@ -220,6 +220,14 @@ export class RpcClient {
 	}
 
 	/**
+	 * Request a graceful shutdown of the agent process.
+	 * Resolves when shutdown is accepted, before runtime disposal completes.
+	 */
+	async shutdown(): Promise<void> {
+		await this.send({ type: "shutdown" });
+	}
+
+	/**
 	 * Start a new session, optionally with parent tracking.
 	 * @param parentSession - Optional parent session path for lineage tracking
 	 * @returns Object with `cancelled: true` if an extension cancelled the new session
