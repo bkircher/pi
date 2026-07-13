@@ -147,7 +147,7 @@ Response:
 {"id": "req-1", "type": "response", "command": "shutdown", "success": true}
 ```
 
-`success: true` means shutdown was accepted, not that it has completed. After emitting the response and waiting for stdout backpressure, Pi disposes the runtime, flushes remaining stdout, and exits with code 0.
+`success: true` means shutdown was accepted, not that it has completed. After emitting the response and waiting for stdout backpressure, Pi disposes the runtime, flushes remaining stdout, and exits with code 0. Repeated `shutdown` commands are acknowledged while disposal is pending; other commands received after shutdown acceptance fail with `Shutdown in progress`.
 
 #### new_session
 

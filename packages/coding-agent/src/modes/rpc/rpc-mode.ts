@@ -81,9 +81,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		{ resolve: (value: any) => void; reject: (error: Error) => void }
 	>();
 
-	// Shutdown request flag
-	let shutdownRequested = false;
-	let shuttingDown = false;
+	let extensionShutdownRequested = false;
+	let rpcShutdownAccepted = false;
+	let shutdownPromise: Promise<never> | undefined;
 	const signalCleanupHandlers: Array<() => void> = [];
 
 	/** Helper for dialog methods with signal/timeout support */
@@ -342,7 +342,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				},
 			},
 			shutdownHandler: () => {
-				shutdownRequested = true;
+				extensionShutdownRequested = true;
 			},
 			onError: (err) => {
 				output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
@@ -370,8 +370,12 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 		for (const signal of signals) {
 			const handler = () => {
+				const exitCode = signal === "SIGHUP" ? 129 : 143;
 				killTrackedDetachedChildren();
-				void shutdown(signal === "SIGHUP" ? 129 : 143, signal);
+				if (shutdownPromise) {
+					process.exit(exitCode);
+				}
+				void shutdown(exitCode, signal);
 			};
 			process.on(signal, handler);
 			signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -382,7 +386,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	registerSignalHandlers();
 
 	// Handle a single command
-	const handleCommand = async (command: RpcCommand): Promise<RpcResponse | undefined> => {
+	const handleCommand = async (
+		command: Exclude<RpcCommand, { type: "shutdown" }>,
+	): Promise<RpcResponse | undefined> => {
 		const id = command.id;
 
 		switch (command.type) {
@@ -427,11 +433,6 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			case "abort": {
 				await session.abort();
 				return success(id, "abort");
-			}
-
-			case "shutdown": {
-				shutdownRequested = true;
-				return success(id, "shutdown");
 			}
 
 			case "new_session": {
@@ -709,27 +710,41 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	 */
 	let detachInput = () => {};
 
-	async function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
-		if (shuttingDown) {
+	function shutdown(exitCode = 0, signal?: NodeJS.Signals): Promise<never> {
+		if (shutdownPromise) {
+			return shutdownPromise;
+		}
+
+		const inFlightShutdown = (async (): Promise<never> => {
+			try {
+				for (const cleanup of signalCleanupHandlers) {
+					cleanup();
+				}
+				unsubscribe?.();
+				unsubscribeBackpressure?.();
+				await runtimeHost.dispose();
+			} catch {
+				// Continue shutdown even if runtime teardown fails
+			}
+
+			try {
+				detachInput();
+				process.stdin.pause();
+				if (signal !== "SIGTERM") {
+					await flushRawStdout();
+				}
+			} catch {
+				// Cleanup failures must not prevent process exit
+			}
+
 			process.exit(exitCode);
-		}
-		shuttingDown = true;
-		for (const cleanup of signalCleanupHandlers) {
-			cleanup();
-		}
-		unsubscribe?.();
-		unsubscribeBackpressure?.();
-		await runtimeHost.dispose();
-		detachInput();
-		process.stdin.pause();
-		if (signal !== "SIGTERM") {
-			await flushRawStdout();
-		}
-		process.exit(exitCode);
+		})();
+		shutdownPromise = inFlightShutdown;
+		return inFlightShutdown;
 	}
 
 	async function checkShutdownRequested(): Promise<void> {
-		if (!shutdownRequested) return;
+		if (!extensionShutdownRequested) return;
 		await shutdown();
 	}
 
@@ -767,6 +782,23 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 
 		const command = parsed as RpcCommand;
 		try {
+			if (command.type === "shutdown") {
+				rpcShutdownAccepted = true;
+				try {
+					output(success(command.id, "shutdown"));
+					await waitForRawStdoutBackpressure();
+				} finally {
+					await shutdown();
+				}
+				return;
+			}
+
+			if (rpcShutdownAccepted || shutdownPromise) {
+				output(error(command.id, command.type, "Shutdown in progress"));
+				await waitForRawStdoutBackpressure();
+				return;
+			}
+
 			const response = await handleCommand(command);
 			if (response) {
 				output(response);
@@ -774,6 +806,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 			await checkShutdownRequested();
 		} catch (commandError: unknown) {
+			if (command.type === "shutdown" && rpcShutdownAccepted) {
+				return;
+			}
 			output(
 				error(
 					command.id,
@@ -786,7 +821,9 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 	};
 
 	const onInputEnd = () => {
-		void shutdown();
+		if (!rpcShutdownAccepted) {
+			void shutdown();
+		}
 	};
 	process.stdin.on("end", onInputEnd);
 
