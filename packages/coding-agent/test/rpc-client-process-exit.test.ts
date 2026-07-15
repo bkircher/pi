@@ -36,6 +36,38 @@ process.stdin.resume();
 		await expect(client.getCommands()).rejects.toThrow(/Agent process exited \(code=43 signal=null\)/);
 	});
 
+	test("drains stdout before rejecting requests after the child exits", async () => {
+		const client = new RpcClient({
+			cliPath: writeChildScript(`
+import { spawn } from "node:child_process";
+
+process.stdin.once("data", (data) => {
+	const command = JSON.parse(data.toString());
+	const response = JSON.stringify({
+		id: command.id,
+		type: "response",
+		command: "shutdown",
+		success: true,
+	}) + "\\n";
+	const responder = spawn(process.execPath, [
+		"-e",
+		"setTimeout(() => process.stdout.write(process.argv[1]), 100)",
+		response,
+	], {
+		stdio: ["ignore", process.stdout, "ignore"],
+	});
+	responder.unref();
+	process.exit(0);
+});
+process.stdin.resume();
+`),
+		});
+		await client.start();
+
+		await expect(client.shutdown()).resolves.toBeUndefined();
+		await client.stop();
+	});
+
 	test("can restart after the child exits following graceful shutdown", async () => {
 		const client = new RpcClient({
 			cliPath: writeChildScript(`
