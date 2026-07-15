@@ -92,6 +92,31 @@ process.stdin.resume();
 		await client.stop();
 	});
 
+	test("can restart immediately after forced shutdown", async () => {
+		const client = new RpcClient({
+			cliPath: writeChildScript(`
+process.on("SIGTERM", () => {});
+process.stdin.once("data", (data) => {
+	const command = JSON.parse(data.toString());
+	process.stdout.write(JSON.stringify({
+		id: command.id,
+		type: "response",
+		command: "shutdown",
+		success: true,
+	}) + "\\n", () => process.exit(0));
+});
+process.stdin.resume();
+`),
+		});
+		await client.start();
+
+		await client.stop();
+
+		await expect(client.start()).resolves.toBeUndefined();
+		await client.shutdown();
+		await client.stop();
+	});
+
 	test("does not signal a child completing graceful shutdown", async () => {
 		const client = new RpcClient({
 			cliPath: writeChildScript(`
