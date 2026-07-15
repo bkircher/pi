@@ -105,7 +105,7 @@ export class RpcClient {
 			process.stderr.write(data);
 		});
 
-		childProcess.once("exit", (code, signal) => {
+		childProcess.once("close", (code, signal) => {
 			if (this.process !== childProcess) return;
 
 			const expectedShutdown = this.shutdownAccepted && code === 0 && signal === null;
@@ -157,16 +157,16 @@ export class RpcClient {
 		this.stopReadingStdout?.();
 		this.stopReadingStdout = null;
 
-		// Register the exit listener before signaling so a fast exit cannot be missed.
+		// Register the close listener before signaling so a fast exit cannot be missed.
 		await new Promise<void>((resolve) => {
 			let timeout: ReturnType<typeof setTimeout> | undefined;
-			const onExit = () => {
+			const onClose = () => {
 				if (timeout) clearTimeout(timeout);
 				resolve();
 			};
-			childProcess.once("exit", onExit);
+			childProcess.once("close", onClose);
 			timeout = setTimeout(() => {
-				childProcess.off("exit", onExit);
+				childProcess.off("close", onClose);
 				childProcess.kill("SIGKILL");
 				resolve();
 			}, 1000);
