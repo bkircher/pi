@@ -167,9 +167,7 @@ export class RpcClient {
 			};
 			childProcess.once("close", onClose);
 			timeout = setTimeout(() => {
-				childProcess.off("close", onClose);
 				childProcess.kill("SIGKILL");
-				resolve();
 			}, 1000);
 
 			if (!gracefulShutdownPending) {
