@@ -61,6 +61,7 @@ export class RpcClient {
 	private requestId = 0;
 	private stderr = "";
 	private exitError: Error | null = null;
+	private shutdownAccepted = false;
 	private options: RpcClientOptions;
 
 	constructor(options: RpcClientOptions = {}) {
@@ -76,6 +77,7 @@ export class RpcClient {
 		}
 
 		this.exitError = null;
+		this.shutdownAccepted = false;
 
 		const cliPath = this.options.cliPath ?? "dist/cli.js";
 		const args = ["--mode", "rpc"];
@@ -105,8 +107,14 @@ export class RpcClient {
 
 		childProcess.once("exit", (code, signal) => {
 			if (this.process !== childProcess) return;
+
+			const expectedShutdown = this.shutdownAccepted && code === 0 && signal === null;
 			const error = this.createProcessExitError(code, signal);
-			this.exitError = error;
+			this.process = null;
+			this.shutdownAccepted = false;
+			this.stopReadingStdout?.();
+			this.stopReadingStdout = null;
+			this.exitError = expectedShutdown ? null : error;
 			this.rejectPendingRequests(error);
 		});
 		childProcess.once("error", (error) => {
@@ -131,8 +139,8 @@ export class RpcClient {
 		// Wait a moment for process to initialize
 		await new Promise((resolve) => setTimeout(resolve, 100));
 
-		if (this.process.exitCode !== null) {
-			const error = this.exitError ?? this.createProcessExitError(this.process.exitCode, this.process.signalCode);
+		if (this.process !== childProcess || childProcess.exitCode !== null || childProcess.signalCode !== null) {
+			const error = this.exitError ?? this.createProcessExitError(childProcess.exitCode, childProcess.signalCode);
 			this.exitError = error;
 			throw error;
 		}
@@ -142,27 +150,31 @@ export class RpcClient {
 	 * Stop the RPC agent process.
 	 */
 	async stop(): Promise<void> {
-		if (!this.process) return;
+		const childProcess = this.process;
+		if (!childProcess) return;
 
+		const gracefulShutdownPending = this.shutdownAccepted;
 		this.stopReadingStdout?.();
 		this.stopReadingStdout = null;
-		this.process.kill("SIGTERM");
 
-		// Wait for process to exit
+		// Register the exit listener before signaling so a fast exit cannot be missed.
 		await new Promise<void>((resolve) => {
-			const timeout = setTimeout(() => {
-				this.process?.kill("SIGKILL");
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			const onExit = () => {
+				if (timeout) clearTimeout(timeout);
+				resolve();
+			};
+			childProcess.once("exit", onExit);
+			timeout = setTimeout(() => {
+				childProcess.off("exit", onExit);
+				childProcess.kill("SIGKILL");
 				resolve();
 			}, 1000);
 
-			this.process?.on("exit", () => {
-				clearTimeout(timeout);
-				resolve();
-			});
+			if (!gracefulShutdownPending) {
+				childProcess.kill("SIGTERM");
+			}
 		});
-
-		this.process = null;
-		this.pendingRequests.clear();
 	}
 
 	/**
@@ -224,7 +236,14 @@ export class RpcClient {
 	 * Resolves when shutdown is accepted, before runtime disposal completes.
 	 */
 	async shutdown(): Promise<void> {
-		await this.send({ type: "shutdown" });
+		const childProcess = this.process;
+		const response = await this.send({ type: "shutdown" });
+		if (!response.success) {
+			throw new Error(response.error);
+		}
+		if (this.process === childProcess) {
+			this.shutdownAccepted = true;
+		}
 	}
 
 	/**
