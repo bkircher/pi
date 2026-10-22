@@ -7,6 +7,7 @@ const terminate = Worker.prototype.terminate;
 const terminations = new Map<Worker, (code: number) => void>();
 
 beforeEach(() => {
+	vi.stubEnv("PI_CODEMODE_MAX_WORKERS", undefined);
 	vi.spyOn(Worker.prototype, "terminate").mockImplementation(function (this: Worker) {
 		this.ref();
 		return new Promise<number>((resolve) => {
@@ -26,8 +27,8 @@ afterEach(async () => {
 	terminations.clear();
 });
 
-const run = (code: string, signal?: AbortSignal) =>
-	executeCodemode("worker-admission", { code }, signal, undefined, undefined);
+const run = (code: string, signal?: AbortSignal, maxWorkers?: number) =>
+	executeCodemode("worker-admission", { code }, signal, undefined, undefined, { getMaxWorkers: () => maxWorkers });
 
 /** Let the first held worker actually exit. */
 async function releaseOne(): Promise<void> {
@@ -159,6 +160,52 @@ describe("codemode worker admission", () => {
 		await Promise.all(pending);
 		expect(results.every((result) => result.isError === undefined)).toBe(true);
 	});
+
+	it.each([
+		{ source: "user settings", maxWorkers: 3, env: undefined },
+		{ source: "the environment instead of user settings", maxWorkers: 1, env: "3" },
+		{ source: "user settings when the environment value is invalid", maxWorkers: 3, env: "0" },
+	])("reads the worker limit from $source", async ({ maxWorkers, env }) => {
+		vi.stubEnv("PI_CODEMODE_MAX_WORKERS", env);
+		const results: Awaited<ReturnType<typeof run>>[] = [];
+
+		const pending = [
+			run("return 1", undefined, maxWorkers).then((result) => results.push(result)),
+			run("return 2", undefined, maxWorkers).then((result) => results.push(result)),
+			run("return 3", undefined, maxWorkers).then((result) => results.push(result)),
+			run("return 4", undefined, maxWorkers).then((result) => results.push(result)),
+		];
+		await vi.waitFor(() => expect(results).toHaveLength(3));
+
+		expect(terminations.size).toBe(3);
+		await releaseOne();
+		await Promise.all(pending);
+		expect(results).toHaveLength(4);
+		expect(results.every((result) => result.isError === undefined)).toBe(true);
+	});
+
+	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 9007199254740992, "3", null])(
+		"uses two workers for an invalid setting: %s",
+		async (maxWorkers) => {
+			const results: Awaited<ReturnType<typeof run>>[] = [];
+
+			const pending = [
+				run("return 1", undefined, maxWorkers as number).then((result) => results.push(result)),
+				run("return 2", undefined, maxWorkers as number).then((result) => results.push(result)),
+			];
+			await Promise.all(pending);
+			const blocked = await run('// @options: {"timeout_ms": 50}\nreturn 3', undefined, maxWorkers as number);
+
+			expect(results).toHaveLength(2);
+			expect(results.every((result) => result.isError === undefined)).toBe(true);
+			expect(terminations.size).toBe(2);
+			expect(blocked.isError).toBe(true);
+			expect(blocked.content).toContainEqual({
+				type: "text",
+				text: expect.stringContaining("while waiting for a free codemode worker"),
+			});
+		},
+	);
 
 	it("ignores an invalid PI_CODEMODE_MAX_WORKERS", async () => {
 		vi.stubEnv("PI_CODEMODE_MAX_WORKERS", "0");

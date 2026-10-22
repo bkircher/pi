@@ -457,7 +457,18 @@ export class SettingsManager {
 
 	/** A copy of the effective settings: global and project settings merged, with overrides. */
 	getSettings(): Settings {
-		return structuredClone(this.settings);
+		const settings = structuredClone(this.settings);
+		// All sessions share the worker limit. Project settings must not change it.
+		const maxWorkers = this.globalSettings.codemode?.maxWorkers;
+		if (maxWorkers !== undefined) {
+			settings.codemode = {
+				...(isMergeableObject(settings.codemode) ? settings.codemode : {}),
+				maxWorkers,
+			};
+		} else if (isMergeableObject(settings.codemode)) {
+			delete settings.codemode.maxWorkers;
+		}
+		return settings;
 	}
 
 	getGlobalSettings(): Settings {

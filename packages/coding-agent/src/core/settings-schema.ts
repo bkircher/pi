@@ -166,6 +166,15 @@ const CodemodeSettingsSchema = Type.Object({
 			default: SETTINGS_DEFAULTS.codemode.inlineBudget,
 		}),
 	),
+	maxWorkers: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			maximum: Number.MAX_SAFE_INTEGER,
+			description:
+				"Maximum codemode workers alive at once. User-level only because all sessions in one Pi process share the limit. PI_CODEMODE_MAX_WORKERS overrides this setting.",
+			default: SETTINGS_DEFAULTS.codemode.maxWorkers,
+		}),
+	),
 });
 
 const PackageSourceSchema = Type.Union(

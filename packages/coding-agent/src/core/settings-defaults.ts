@@ -57,6 +57,7 @@ export const SETTINGS_DEFAULTS = {
 	codemode: {
 		mode: "on",
 		inlineBudget: 3000,
+		maxWorkers: 2,
 	},
 	cacheWarming: "streaming",
 	tuiMode: "fullscreen",

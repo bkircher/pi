@@ -71,6 +71,8 @@ export interface CodemodeToolOptions {
 	getMode?: () => CodemodeMode;
 	/** Token budget for tool declarations in the description. Default: {@link DEFAULT_CODEMODE_INLINE_BUDGET}. */
 	getInlineBudget?: () => number | undefined;
+	/** User-level worker limit. Updates the shared process limit before each script; PI_CODEMODE_MAX_WORKERS takes precedence. */
+	getMaxWorkers?: () => number | undefined;
 }
 
 const TEXT_OUTPUT_SCHEMA: CodemodeJsonSchema = { type: "string" };

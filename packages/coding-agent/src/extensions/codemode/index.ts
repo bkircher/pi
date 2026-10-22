@@ -40,6 +40,7 @@ export function createCodemodeExtension(options: CodemodeExtensionOptions = {}):
 					new Map(pi.getAllTools().map((tool) => [tool.name, tool.promptGuidelines ?? []] as const)),
 				getMode: () => options.mode ?? readMode(pi),
 				getInlineBudget: () => options.inlineBudget ?? readInlineBudget(pi),
+				getMaxWorkers: () => pi.getSettings().codemode?.maxWorkers,
 			}),
 			defaultActive: false,
 		});

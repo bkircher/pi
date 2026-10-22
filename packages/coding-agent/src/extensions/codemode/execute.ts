@@ -27,6 +27,7 @@ import {
 import { getCodemodeWorkerSpecifier, getQuickJSWasmPath } from "../../config.ts";
 import type { ExtensionToolContext, ToolNamespace } from "../../core/extensions/types.ts";
 import type { SessionEntry } from "../../core/session-manager.ts";
+import { SETTINGS_DEFAULTS } from "../../core/settings-defaults.ts";
 import { formatSize } from "../../core/tools/truncate.ts";
 import { combineUsage } from "../../core/usage-totals.ts";
 import { writeOutputFile } from "../../utils/output-files.ts";
@@ -54,13 +55,13 @@ const MAX_CONCURRENT_MODEL_CALLS = 4;
  * `InternalError: out of memory` inside the script.
  */
 const CODEMODE_MEMORY_LIMIT_BYTES = 256 * 1024 * 1024;
-// Shared across calls and sessions. Allow one replacement while a cancelled worker is still exiting.
-const DEFAULT_MAX_CODEMODE_WORKERS = 2;
+// Shared across calls and sessions. Updated from user settings before each script.
+let configuredMaxCodemodeWorkers: number = SETTINGS_DEFAULTS.codemode.maxWorkers;
 
 /** `PI_CODEMODE_MAX_WORKERS` if it is a positive integer. Read per call so SDK hosts can set it at runtime. */
 function maxCodemodeWorkers(): number {
 	const value = Number(process.env.PI_CODEMODE_MAX_WORKERS);
-	return Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_CODEMODE_WORKERS;
+	return Number.isInteger(value) && value > 0 ? value : configuredMaxCodemodeWorkers;
 }
 /**
  * How long a script waits for a free worker before failing. Bounds the wait when every worker is
@@ -550,6 +551,12 @@ export async function executeCodemode(
 			return toScriptValue(tool, outcome);
 		},
 	}));
+
+	const maxWorkers = options.getMaxWorkers?.();
+	configuredMaxCodemodeWorkers =
+		typeof maxWorkers === "number" && Number.isSafeInteger(maxWorkers) && maxWorkers > 0
+			? maxWorkers
+			: SETTINGS_DEFAULTS.codemode.maxWorkers;
 
 	// The wait for a worker counts toward the script's deadline.
 	const deadline = sourceOptions.timeoutMs ?? Number.POSITIVE_INFINITY;

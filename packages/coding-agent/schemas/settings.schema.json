@@ -637,6 +637,13 @@
           "minimum": 0,
           "description": "Estimated tokens available for inline codemode tool declarations.",
           "default": 3000
+        },
+        "maxWorkers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Maximum codemode workers alive at once. User-level only because all sessions in one Pi process share the limit. PI_CODEMODE_MAX_WORKERS overrides this setting.",
+          "default": 2
         }
       }
     },
